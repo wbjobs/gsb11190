@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打字机效果 + 性能监控</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #1e1f24; color: #e6e6e6; min-height: 100vh; padding: 16px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  h1 { font-size: 18px; font-weight: 600; }
+  .panel { background: #2a2b31; border: 1px solid #3a3b42; border-radius: 8px; padding: 12px; }
+  textarea {
+    width: 100%; height: 110px; resize: vertical; background: #1e1f24; color: #e6e6e6;
+    border: 1px solid #3a3b42; border-radius: 6px; padding: 8px; font-size: 14px;
+  }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  button {
+    background: #3d7ef7; color: #fff; border: none; border-radius: 6px;
+    padding: 7px 14px; font-size: 14px; cursor: pointer;
+  }
+  button:hover { background: #2f6ae0; }
+  button:disabled { background: #4a4b52; cursor: not-allowed; }
+  button.secondary { background: #4a4b52; }
+  button.secondary:hover { background: #585964; }
+  .speed { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .speed input[type=range] { width: 160px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 18px; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .stat .label { color: #9a9ba3; font-size: 12px; }
+  .stat .value { font-size: 18px; font-weight: 600; }
+  .stat .value.warn { color: #f7b83d; }
+  .stat .value.bad { color: #f75d5d; }
+  #fpsCanvas { width: 100%; height: 80px; display: block; background: #1e1f24; border-radius: 6px; }
+  #output {
+    white-space: pre-wrap; word-break: break-all; min-height: 160px; max-height: 50vh;
+    overflow-y: auto; font-size: 15px; line-height: 1.7; padding: 4px;
+  }
+  #output .caret {
+    display: inline-block; width: 2px; height: 1em; background: #3d7ef7;
+    vertical-align: -0.15em; animation: blink 0.8s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #4a4b52; color: #cfcfd6; }
+  .badge.degraded { background: #6b4d12; color: #f7b83d; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>打字机效果 <span id="modeBadge" class="badge">正常模式</span></h1>
+
+  <div class="panel">
+    <textarea id="input" placeholder="在此输入文本，然后点击「开始」…"></textarea>
+    <div class="controls" style="margin-top:10px">
+      <button id="btnStart">开始</button>
+      <button id="btnPause" class="secondary" disabled>暂停</button>
+      <button id="btnReset" class="secondary" disabled>重置</button>
+      <button id="btnSample" class="secondary">填充10万字测试文本</button>
+      <label class="speed">
+        速度 <input type="range" id="speed" min="1" max="2000" value="30">
+        <span id="speedLabel">30 字/秒</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="stats">
+      <div class="stat"><div class="label">FPS</div><div class="value" id="fpsValue">--</div></div>
+      <div class="stat"><div class="label">已显示字符</div><div class="value" id="charCount">0 / 0</div></div>
+      <div class="stat"><div class="label">预计剩余时间</div><div class="value" id="eta">--</div></div>
+      <div class="stat"><div class="label">长任务次数</div><div class="value" id="longTasks">0</div></div>
+    </div>
+    <canvas id="fpsCanvas" style="margin-top:10px"></canvas>
+  </div>
+
+  <div class="panel">
+    <div id="output"><span id="caret" class="caret" hidden></span></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var input = document.getElementById('input');
+  var output = document.getElementById('output');
+  var caret = document.getElementById('caret');
+  var btnStart = document.getElementById('btnStart');
+  var btnPause = document.getElementById('btnPause');
+  var btnReset = document.getElementById('btnReset');
+  var btnSample = document.getElementById('btnSample');
+  var speedSlider = document.getElementById('speed');
+  var speedLabel = document.getElementById('speedLabel');
+  var fpsValue = document.getElementById('fpsValue');
+  var charCount = document.getElementById('charCount');
+  var etaValue = document.getElementById('eta');
+  var longTasksValue = document.getElementById('longTasks');
+  var modeBadge = document.getElementById('modeBadge');
+  var fpsCanvas = document.getElementById('fpsCanvas');
+  var fpsCtx = fpsCanvas.getContext('2d');
+
+  // ---------- 状态 ----------
+  var text = '';          // 完整文本
+  var pos = 0;            // 已"逻辑显示"的字符数
+  var speed = 30;         // 字/秒
+  var running = false;    // 打字会话进行中
+  var paused = false;
+  var acc = 0;            // 小数累积器（每帧多字/少于一字都精确）
+  var pending = '';       // 降级模式下待写入 DOM 的缓冲
+  var lastFlush = 0;      // 上次 DOM 写入时间
+
+  // 输出区只用一个文本节点，appendData 增量追加，避免重建整段文本
+  var textNode = document.createTextNode('');
+  output.insertBefore(textNode, caret);
+
+  // ---------- 降级模式 ----------
+  var DEGRADE_ENTER_FPS = 30;   // 平均 FPS 低于此值进入降级
+  var DEGRADE_EXIT_FPS = 50;    // 回升到此值以上退出降级
+  var FLUSH_INTERVAL = 120;     // 降级模式下 DOM 写入间隔(ms)
+  var degraded = false;
+  var degradeCooldownUntil = 0;
+
+  // ---------- FPS 统计 ----------
+  var fpsSamples = [];          // 曲线数据（最近 N 个瞬时值）
+  var MAX_SAMPLES = 300;
+  var emaFps = 0;               // 指数滑动平均，用于降级判断与显示
+  var lastFrameTs = 0;
+  var MAX_DT = 100;             // 单帧最大计时间隔(ms)，后台恢复不跳字的关键
+
+  // ---------- PerformanceObserver：长任务监控 ----------
+  var longTaskCount = 0;
+  try {
+    var po = new PerformanceObserver(function (list) {
+      longTaskCount += list.getEntries().length;
+      longTasksValue.textContent = String(longTaskCount);
+    });
+    po.observe({ entryTypes: ['longtask'] });
+  } catch (e) { /* 浏览器不支持 longtask 时静默降级 */ }
+
+  // ---------- 后台标签页恢复 ----------
+  // rAF 在后台会暂停，恢复后第一帧 dt 会很大；
+  // 通过 MAX_DT 钳制 + visibilitychange 时重置时间基准，保证不跳字。
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) {
+      lastFrameTs = 0; // 下一帧重新建立时间基准
+    }
+  });
+
+  // ---------- 打字核心 ----------
+  function appendChars(n) {
+    if (n <= 0 || pos >= text.length) return;
+    var end = Math.min(pos + n, text.length);
+    var chunk = text.slice(pos, end);
+    pos = end;
+    if (degraded) {
+      pending += chunk; // 降级：先缓冲，按固定间隔批量写 DOM
+    } else {
+      textNode.appendData(chunk);
+    }
+  }
+
+  function flushPending(now) {
+    if (pending && now - lastFlush >= FLUSH_INTERVAL) {
+      textNode.appendData(pending);
+      pending = '';
+      lastFlush = now;
+    }
+  }
+
+  function tickTyping(dtMs, now) {
+    if (!running || paused || pos >= text.length) return;
+    acc += speed * dtMs / 1000;
+    var n = Math.floor(acc);
+    if (n > 0) {
+      acc -= n;
+      appendChars(n);
+    }
+    if (degraded) flushPending(now);
+    if (pos >= text.length) finish();
+  }
+
+  function finish() {
+    if (pending) { textNode.appendData(pending); pending = ''; }
+    running = false;
+    paused = false;
+    caret.hidden = true;
+    updateButtons();
+  }
+
+  // ---------- FPS 曲线 ----------
+  function resizeCanvas() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = fpsCanvas.clientWidth, h = fpsCanvas.clientHeight;
+    if (fpsCanvas.width !== w * dpr || fpsCanvas.height !== h * dpr) {
+      fpsCanvas.width = w * dpr;
+      fpsCanvas.height = h * dpr;
+    }
+  }
+
+  function drawFpsCurve() {
+    resizeCanvas();
+    var dpr = window.devicePixelRatio || 1;
+    var w = fpsCanvas.width, h = fpsCanvas.height;
+    fpsCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var cw = w / dpr, ch = h / dpr;
+    fpsCtx.clearRect(0, 0, cw, ch);
+
+    var maxFps = 120;
+    // 60fps 参考线
+    fpsCtx.strokeStyle = '#3a3b42';
+    fpsCtx.beginPath();
+    var y60 = ch - (60 / maxFps) * ch;
+    fpsCtx.moveTo(0, y60); fpsCtx.lineTo(cw, y60);
+    fpsCtx.stroke();
+
+    if (fpsSamples.length < 2) return;
+    fpsCtx.strokeStyle = degraded ? '#f7b83d' : '#3d7ef7';
+    fpsCtx.lineWidth = 1.5;
+    fpsCtx.beginPath();
+    var step = cw / (MAX_SAMPLES - 1);
+    var offset = MAX_SAMPLES - fpsSamples.length;
+    for (var i = 0; i < fpsSamples.length; i++) {
+      var x = (offset + i) * step;
+      var y = ch - (Math.min(fpsSamples[i], maxFps) / maxFps) * ch;
+      if (i === 0) fpsCtx.moveTo(x, y); else fpsCtx.lineTo(x, y);
+    }
+    fpsCtx.stroke();
+  }
+
+  // ---------- 降级判断 ----------
+  function updateDegradation(now) {
+    if (!degraded && emaFps > 0 && emaFps < DEGRADE_ENTER_FPS && now > degradeCooldownUntil) {
+      degraded = true;
+      modeBadge.textContent = '降级模式（低频批量渲染）';
+      modeBadge.classList.add('degraded');
+    } else if (degraded && emaFps > DEGRADE_EXIT_FPS) {
+      degraded = false;
+      degradeCooldownUntil = now + 3000; // 防止抖动
+      if (pending) { textNode.appendData(pending); pending = ''; }
+      modeBadge.textContent = '正常模式';
+      modeBadge.classList.remove('degraded');
+    }
+  }
+
+  // ---------- 状态显示 ----------
+  function formatEta(seconds) {
+    if (!isFinite(seconds)) return '--';
+    if (seconds < 1) return '<1 秒';
+    var m = Math.floor(seconds / 60), s = Math.ceil(seconds % 60);
+    return m > 0 ? m + ' 分 ' + s + ' 秒' : s + ' 秒';
+  }
+
+  var lastStatsUpdate = 0;
+  function updateStats(now) {
+    if (now - lastStatsUpdate < 200) return; // 统计文字 5Hz 刷新即可
+    lastStatsUpdate = now;
+    fpsValue.textContent = emaFps > 0 ? emaFps.toFixed(0) : '--';
+    fpsValue.className = 'value' + (emaFps < DEGRADE_ENTER_FPS ? ' bad' : emaFps < 50 ? ' warn' : '');
+    charCount.textContent = pos + ' / ' + text.length;
+    if (running && !paused && pos < text.length) {
+      etaValue.textContent = formatEta((text.length - pos) / speed);
+    } else if (pos >= text.length && text.length > 0) {
+      etaValue.textContent = '已完成';
+    } else {
+      etaValue.textContent = '--';
+    }
+  }
+
+  // ---------- 主循环 ----------
+  function frame(ts) {
+    requestAnimationFrame(frame);
+    if (!lastFrameTs) { lastFrameTs = ts; return; }
+    var dt = ts - lastFrameTs;
+    lastFrameTs = ts;
+    if (dt <= 0) return;
+    dt = Math.min(dt, MAX_DT); // 钳制：后台恢复/卡顿不跳字
+
+    var instantFps = 1000 / dt;
+    emaFps = emaFps ? emaFps * 0.9 + instantFps * 0.1 : instantFps;
+    fpsSamples.push(instantFps);
+    if (fpsSamples.length > MAX_SAMPLES) fpsSamples.shift();
+
+    tickTyping(dt, ts);
+    updateDegradation(ts);
+    updateStats(ts);
+    drawFpsCurve();
+  }
+  requestAnimationFrame(frame);
+
+  // ---------- 控件 ----------
+  function updateButtons() {
+    btnStart.disabled = running && !paused ? true : false;
+    btnStart.textContent = paused ? '继续' : (running ? '进行中…' : '开始');
+    btnPause.disabled = !running || paused;
+    btnReset.disabled = !running && pos === 0;
+    btnPause.textContent = '暂停';
+  }
+
+  btnStart.addEventListener('click', function () {
+    if (paused) { // 继续：位置/累积器原样保留，从断点恢复
+      paused = false;
+      caret.hidden = false;
+      updateButtons();
+      return;
+    }
+    if (running) return;
+    text = input.value;
+    pos = 0;
+    acc = 0;
+    pending = '';
+    textNode.data = '';
+    running = true;
+    paused = false;
+    caret.hidden = false;
+    updateButtons();
+  });
+
+  btnPause.addEventListener('click', function () {
+    if (!running || paused) return;
+    paused = true; // 停止累积，pos 保持不变，恢复时从原位置继续
+    updateButtons();
+  });
+
+  btnReset.addEventListener('click', function () {
+    running = false;
+    paused = false;
+    pos = 0;
+    acc = 0;
+    pending = '';
+    textNode.data = '';
+    caret.hidden = true;
+    updateButtons();
+    updateStats(Infinity); // 强制刷新一次
+    charCount.textContent = '0 / ' + (input.value.length || 0);
+    etaValue.textContent = '--';
+  });
+
+  speedSlider.addEventListener('input', function () {
+    speed = Number(speedSlider.value);
+    speedLabel.textContent = speed + ' 字/秒';
+  });
+
+  btnSample.addEventListener('click', function () {
+    var unit = '这是一段用于测试打字机效果的示例文本。The quick brown fox jumps over the lazy dog. 0123456789。';
+    var target = 100000;
+    var parts = [];
+    var len = 0;
+    while (len < target) { parts.push(unit); len += unit.length; }
+    input.value = parts.join('').slice(0, target);
+    charCount.textContent = pos + ' / ' + input.value.length;
+  });
+
+  updateButtons();
+})();
+</script>
+</body>
+</html>
