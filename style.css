@@ -1,0 +1,110 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: #0f1420;
+  color: #e6e9f0;
+}
+
+.container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+h1 { font-size: 20px; margin: 0 0 16px; }
+h1 .sub { font-size: 12px; font-weight: normal; color: #8b93a7; margin-left: 8px; }
+
+.panel {
+  background: #171e2e;
+  border: 1px solid #263049;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+textarea {
+  width: 100%;
+  height: 110px;
+  resize: vertical;
+  background: #0f1420;
+  color: #e6e9f0;
+  border: 1px solid #2c3a5c;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+button {
+  background: #232c44;
+  color: #e6e9f0;
+  border: 1px solid #33405f;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: #2b3653; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.primary { background: #2f6fed; border-color: #2f6fed; }
+button.primary:hover:not(:disabled) { background: #3d7df0; }
+
+.speed-row label { font-size: 14px; color: #8b93a7; }
+.speed-row input[type="range"] { flex: 1; min-width: 160px; }
+#speedLabel { font-variant-numeric: tabular-nums; font-size: 14px; min-width: 90px; }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.stat {
+  background: #0f1420;
+  border: 1px solid #263049;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.stat .label { display: block; font-size: 12px; color: #8b93a7; margin-bottom: 4px; }
+.stat .value { font-size: 16px; font-variant-numeric: tabular-nums; }
+.stat .value.warn { color: #f0b429; }
+.stat .value.bad { color: #e5534b; }
+
+#fpsCanvas {
+  width: 100%;
+  height: 90px;
+  display: block;
+  background: #0f1420;
+  border: 1px solid #263049;
+  border-radius: 8px;
+}
+
+.output {
+  min-height: 120px;
+  max-height: 420px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 15px;
+  line-height: 1.8;
+  padding: 4px;
+}
+.output .cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: #2f6fed;
+  vertical-align: -0.15em;
+  animation: blink 0.9s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }

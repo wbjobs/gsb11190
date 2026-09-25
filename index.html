@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打字机效果 + 性能监控</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="container">
+  <h1>打字机效果 <span class="sub">DOM + requestAnimationFrame + PerformanceObserver + Canvas</span></h1>
+
+  <section class="panel input-panel">
+    <textarea id="input" placeholder="在此输入或粘贴文本（支持 10 万字以上）…"></textarea>
+    <div class="row">
+      <button id="btnSample">填充 10 万字测试文本</button>
+      <button id="btnStart" class="primary">开始</button>
+      <button id="btnPause" disabled>暂停</button>
+      <button id="btnResume" disabled>继续</button>
+      <button id="btnReset" disabled>重置</button>
+    </div>
+    <div class="row speed-row">
+      <label for="speed">速度</label>
+      <input type="range" id="speed" min="1" max="2000" value="30">
+      <span id="speedLabel">30 字/秒</span>
+    </div>
+  </section>
+
+  <section class="panel stats-panel">
+    <div class="stats">
+      <div class="stat"><span class="label">FPS</span><span class="value" id="statFps">—</span></div>
+      <div class="stat"><span class="label">帧耗时</span><span class="value" id="statFrame">—</span></div>
+      <div class="stat"><span class="label">已显示</span><span class="value" id="statChars">0 / 0</span></div>
+      <div class="stat"><span class="label">剩余时间</span><span class="value" id="statEta">—</span></div>
+      <div class="stat"><span class="label">长任务</span><span class="value" id="statLongtask">0</span></div>
+      <div class="stat"><span class="label">降级</span><span class="value" id="statDegrade">无</span></div>
+    </div>
+    <canvas id="fpsCanvas" width="520" height="90"></canvas>
+  </section>
+
+  <section class="panel output-panel">
+    <div id="output" class="output" aria-live="off"></div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
